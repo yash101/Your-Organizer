@@ -27,3 +27,13 @@
 *.exe
 *.out
 *.app
+
+# QT Creator
+*.user
+
+# VIM
+*.swo
+*.swp
+
+# Mac
+.DS_Store
