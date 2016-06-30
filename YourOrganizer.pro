@@ -7,12 +7,8 @@ LIBS += -lssl -lcrypto
 LIBS += -lboost_system -lboost_thread
 
 
-SOURCES += main.cpp \
-    tcpsockets.cpp \
-    tcpconnection.cpp
+SOURCES += main.cpp
 
 HEADERS += \
-    tcpsockets.h \
     exceptions.h \
-    automaticmutex.h \
-    tcpconnection.h
+    automaticmutex.h
