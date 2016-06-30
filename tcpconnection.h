@@ -21,13 +21,14 @@ typedef ssize_t SOCK_RW_RET;
     void* _address;
     void* _remoteAddress;
     void* _timeout;
+    void* _ssl;
 
     SOCK_RW_RET read_int(void* buffer, size_t len, int flags);
     SOCK_RW_RET write_int(void* buffer, size_t len, int flags);
 
   public:
     Connection();
-    ~Connection();
+    virtual ~Connection();
 
     SOCK_RW_RET read(void* buffer, size_t bufferLength);
     SOCK_RW_RET read(char& ch);

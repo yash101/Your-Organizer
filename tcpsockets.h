@@ -3,7 +3,7 @@
 
 #include "tcpconnection.h"
 
-#include <map>
+#include <vector>
 
 //Socket file descriptors are unsigned on Windows[32]
 //To ensure bug-free!
@@ -18,6 +18,11 @@ namespace sock
   typedef void MUTEX;
 
   int initializeSockets();
+  int deinitializeSockets();
+  void initSSL();
+  void destSSL();
+  void initialize();
+  void deinitialize();
 
   struct SSLArguments
   {
@@ -29,6 +34,16 @@ namespace sock
     SSLArguments(const char* priKey);
   };
 
+  struct ListenerSocket
+  {
+  public:
+    SSLArguments arguments;
+    int fd;
+    void* address;
+    int listeningPort;
+    void* SSLContext;
+  };
+
   class OutConnection : public sock::Connection
   {
   public:
@@ -36,25 +51,15 @@ namespace sock
     inline void* LocalAddress() { return this->_address; }
     inline void* RemoteAddress() { return this->_remoteAddress; }
     inline int& FileDescriptor() { return this->_fd; }
+    inline void*& Ssl() { return this->_ssl; }
   };
 
   class SocketServer
   {
   private:
 
-    int _ictr = 0;
-    MUTEX* _fileDescriptorsMutex;
-    std::map<int, SOCK_HANDLE> _fileDescriptors;
-
-    MUTEX* _addressesMutex;
-    std::map<int, void*> _addresses;
-
-    MUTEX* _listeningPortsMutex;
-    std::map<int, int> _listeningPorts;
-
-    MUTEX* _SSLVarsMutex;
-    std::map<int, SSLArguments> _SSLVars;
-
+    bool _isServerRunning;
+    std::vector<ListenerSocket> _sockets;
 
     MUTEX* _timeoutStructureMutex;
     void* _timeoutStructure;
@@ -63,16 +68,20 @@ namespace sock
     size_t _nConnectedClients;
     size_t _nMaxConnectedClients;
 
-    void prepareSocket(int key, int port);
+    SOCK_HANDLE _signaler_pipe;
+    SOCK_HANDLE _target_pipe;
 
     void accepter();
     void runner(void* connection);
 
     void initializeVariables();
 
+    void shutdownSSL(void* SSL_Var);
+
   protected:
 
     virtual void whenPortIsAssigned(int port);
+    virtual void incomingConnection(OutConnection* connection);
 
   public:
 
@@ -93,6 +102,8 @@ namespace sock
 
     SocketServer& setTCPQueueSize(int n);
     int getTCPQueueSize();
+
+    void stopServer();
   };
 }
 

@@ -2,6 +2,9 @@
 #include "exceptions.h"
 #include "automaticmutex.h"
 
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
 #include <thread>
 #include <mutex>
 #include <string.h>
@@ -11,8 +14,8 @@
 #define TCPQUEUESIZE 5
 #endif
 
-#ifndef ACCEPT_TIMEOUT_SEC
-#define ACCEPT_TIMEOUT_SEC 1
+#ifndef SELECT_TIMEOUT_SEC
+#define SELECT_TIMEOUT_SEC 1
 #endif
 
 static struct timeval select_timeout;
@@ -23,9 +26,10 @@ static struct timeval select_timeout;
 #include <netinet/in.h>
 #include <unistd.h>
 #include <errno.h>
+#include <fcntl.h>
 
 #define SOCKET_VALID(fd) (fd < 0)
-#define SOCKET_NOERROR(x) (x > 0)
+#define SOCKET_NOERROR(x) (x >= 0)
 #define FD_INITIALIZER -1
 
 //Include Windows headers for socket programming
@@ -51,8 +55,9 @@ static bool WsaInitialized = false;
 
 int sock::initializeSockets()
 {
-  select_timeout.tv_sec = ACCEPT_TIMEOUT_SEC;
+  select_timeout.tv_sec = SELECT_TIMEOUT_SEC;
   select_timeout.tv_usec = 0;
+
   if(!WsaInitialized)
   {
     WsaVersionRequested = MAKEWORD(2, 2);
@@ -65,13 +70,25 @@ int sock::initializeSockets()
   return WsaError;
 }
 
+int sock::deinitializeSockets()
+{
+  return WSACleanup();
+}
+
 //Initialize non-windows sockets (nothing to do)
 #else
 
+
+
 inline int sock::initializeSockets()
 {
-  select_timeout.tv_sec = ACCEPT_TIMEOUT_SEC;
+  select_timeout.tv_sec = SELECT_TIMEOUT_SEC;
   select_timeout.tv_usec = 0;
+  return 0;
+}
+
+inline int sock::deinitializeSockets()
+{
   return 0;
 }
 
@@ -92,24 +109,39 @@ sock::SSLArguments::SSLArguments(const char* priKey) :
 }
 
 
+
 //Initialize variables
 //May throw std::bad_alloc in case of failure to allocate any of the
 //mutexes or timeval structures
 void sock::SocketServer::initializeVariables()
 {
-  this->_ictr = 0;
+  this->_isServerRunning = false;
   this->_nConnectedClients = 0;
   this->_nMaxConnectedClients = 0;
 
   this->_timeoutStructure = (void*) new struct timeval;
 
-  this->_fileDescriptorsMutex = (MUTEX*) new std::mutex;
-  this->_addressesMutex = (MUTEX*) new std::mutex;
-  this->_listeningPortsMutex = (MUTEX*) new std::mutex;
-  this->_SSLVarsMutex = (MUTEX*) new std::mutex;
   this->_timeoutStructureMutex = (MUTEX*) new std::mutex;
   this->_connectedClientsMutex = (MUTEX*) new std::mutex;
+
+
+  //Create IPC pipe
+  int pipes[2];
+  int ret = pipe2(pipes, O_NONBLOCK);
+  if(ret < 0)
+  {
+    delete (struct timeval*) this->_timeoutStructure;
+    delete (std::mutex*) this->_timeoutStructureMutex;
+    delete (std::mutex*) this->_connectedClientsMutex;
+
+    throw EXCEPTION("Unable to create IPC Pipe!", errno);
+  }
+
+  this->_signaler_pipe = pipes[0];
+  this->_target_pipe = pipes[1];
 }
+
+
 
 //Initialize SocketServer class
 sock::SocketServer::SocketServer()
@@ -117,24 +149,38 @@ sock::SocketServer::SocketServer()
   this->initializeVariables();
 }
 
+
+
 //Destroy the SocketServer
 sock::SocketServer::~SocketServer()
 {
   //Tons of memory management :)
   //Kinda hate my life by this time, but whatever :)
+
+  //Delete the timeout-handling structure
   delete ((struct timeval*) this->_timeoutStructure);
 
-  delete ((std::mutex*) this->_fileDescriptorsMutex);
-  delete ((std::mutex*) this->_addressesMutex);
-  delete ((std::mutex*) this->_listeningPortsMutex);
-  delete ((std::mutex*) this->_SSLVarsMutex);
+  //Delete the mutexes for the timeout and number of connected clients
   delete ((std::mutex*) this->_timeoutStructureMutex);
   delete ((std::mutex*) this->_connectedClientsMutex);
 
-  for(std::map<int, void*>::const_iterator it = this->_addresses.begin(); it != this->_addresses.end(); ++it)
+
+  /****************************************
+   *+-----------------------------------++*
+   *|    ^													 	  ||*
+   *|   / \														  ||*
+   *|  / | \  MOVE TO stop_server				||*
+   *| /  .  \													  ||*
+   *| ```````													  ||*
+   *+===================================++*
+   ****************************************/
+  //Deallocate any memory used by struct sockaddr_in*'s
+  for(size_t i = 0; i < this->_sockets.size(); i++)
   {
-    struct sockaddr_in* s = (struct sockaddr_in*) it->second;
-    delete s;
+    if(this->_sockets[i].address != NULL)
+    {
+      delete ((struct sockaddr_in*) this->_sockets[i].address);
+    }
   }
 }
 
@@ -142,157 +188,149 @@ sock::SocketServer::~SocketServer()
 //Turn on the server
 sock::SocketServer& sock::SocketServer::startServer()
 {
-  //Check to make sure there is at least one port we would like to listen on
-  if(this->_listeningPorts.empty())
+  if(this->_isServerRunning)
+    throw EXCEPTION("Server already running!", this->_sockets.size());
+  this->_isServerRunning = true;
+
+  for(size_t i = 0; i < this->_sockets.size(); i++)
   {
-    throw EXCEPTION("Attempting to start server with no listening ports!", 0);
-    return (*this);
+    sock::ListenerSocket sock = this->_sockets[i];
+
+    //Enable SSL. If fails, mark this socket as no SSL
+    if(sock.arguments.SSLEnable)
+    {
+      sock.SSLContext = (void*) SSL_CTX_new(TLSv1_1_server_method());
+      if(sock.SSLContext == NULL)
+      {
+        ERR_print_errors_fp(stderr);
+        fprintf(stderr, "Error creating SSL context. Will disable SSL");
+        sock.arguments.SSLEnable = false;
+      }
+      else
+      {
+        if(SSL_CTX_use_certificate_file((SSL_CTX*) sock.SSLContext, sock.arguments.privateKeyPath, SSL_FILETYPE_PEM) <= 0)
+        {
+          ERR_print_errors_fp(stderr);
+          abort();
+        }
+
+        if(SSL_CTX_use_PrivateKey_file((SSL_CTX*) sock.SSLContext, sock.arguments.privateKeyPath, SSL_FILETYPE_PEM) <= 0)
+        {
+          ERR_print_errors_fp(stderr);
+          abort();
+        }
+      }
+    }
+
+    sock.fd = socket(AF_INET, SOCK_STREAM | O_NONBLOCK, 0);
+    if(!SOCKET_NOERROR(sock.fd))
+    {
+      if(errno == EACCES || errno == EAFNOSUPPORT || errno == EINVAL || errno == EMFILE || errno == ENFILE || errno == ENOBUFS || errno == ENOMEM || errno == EPROTONOSUPPORT)
+      {
+        for(size_t j = 0; j < i; i++)
+        {
+#ifndef _WIN32
+          close(this->_sockets[i].fd);
+#else
+          closesocket(this->_sockets[i].fd);
+#endif
+          delete ((struct sockaddr_in*) this->_sockets[i].address);
+        }
+        throw EXCEPTION("Unable to create new socket! ERROR!", sock.listeningPort);
+      }
+    }
+
+
+    //Set the address structure
+    sock.address = (void*) new (std::nothrow) struct sockaddr_in;
+    ((struct sockaddr_in*) sock.address)->sin_addr.s_addr = INADDR_ANY;
+    ((struct sockaddr_in*) sock.address)->sin_family = AF_INET;
+    ((struct sockaddr_in*) sock.address)->sin_port = htons(sock.listeningPort);
+    this->_sockets[i] = sock;
+
+
+    //Set reuseaddr to true
+#ifdef _WIN32
+    typedef char sso_tp;
+#else
+    typedef const void sso_tp;
+#endif
+
+    int reuseaddr = 1;
+    setsockopt(sock.fd, SOL_SOCKET, SO_REUSEADDR, (sso_tp*) &reuseaddr, (socklen_t) sizeof(decltype(reuseaddr)));
+
+
+    //Bind socket to address
+    int ret = bind(
+          sock.fd,
+          (struct sockaddr*) sock.address,
+          sizeof(struct sockaddr_in)
+    );
+
+    //Close all connections and exit
+    if(!SOCKET_NOERROR(ret))
+    {
+      for(size_t j = 0; j <= i; i++)
+      {
+#ifndef _WIN32
+        close(this->_sockets[i].fd);
+#else
+        closesocket(this->_sockets[i].fd);
+#endif
+        delete ((struct sockaddr_in*) this->_sockets[i].address);
+      }
+    }
+
+
+    //Listen for incoming connections
+    listen(sock.fd, TCPQUEUESIZE);
+
+    //Run callback for when port is assigned
+    this->whenPortIsAssigned(sock.listeningPort);
   }
 
-  throw EXCEPTION("NOT IMPLEMENTED YET :(", -1);
+  this->accepter();
+  return (*this);
 }
 
+
+void sock::SocketServer::stopServer()
+{
+  send(this->_signaler_pipe, "\0", sizeof("\0"), MSG_NOSIGNAL);
+}
 
 //Add a port to listen on
 sock::SocketServer& sock::SocketServer::addListeningPort(int port, SSLArguments arguments)
 {
-  //Check to make sure we do not have a port zero
-  if(port == 0)
+  if(this->_isServerRunning)
   {
-    throw EXCEPTION("Port 0 is not supported by this server!", 0);
+    throw EXCEPTION("Unable to add port! Server is already running!", this->_sockets.size());
+    return (*this);
   }
 
-  //Figure out what key to put this under
-  int key = -1;
-  base::AutoMutex<std::mutex> listPorts(this->_listeningPortsMutex);
-  listPorts.lock();
-  for(std::map<int, int>::const_iterator it = this->_listeningPorts.begin(); it != this->_listeningPorts.end(); it++)
+  for(size_t i = 0; i < this->_sockets.size(); i++)
   {
-    if(it->second == port)
+    if(this->_sockets[i].listeningPort == port)
     {
-      key = it->first;
-      break;
+      this->_sockets[i].arguments = arguments;
+      return (*this);
     }
   }
-  listPorts.unlock();
 
-  if(key < 0)
-  {
-    //Set the key
-    this->_ictr++;
-    key = this->_ictr;
-    //Set the port [database]
-    listPorts.lock();
-    this->_listeningPorts[key] = port;
-    listPorts.unlock();
-  }
+  sock::ListenerSocket sock;
+  sock.address = (void*) new (std::nothrow) struct sockaddr_in;
+  sock.arguments = arguments;
+  sock.fd = -1;
+  sock.listeningPort = port;
 
-  //Set the SSL Variables
-  base::AutoMutex<std::mutex> SSLVars(this->_SSLVarsMutex);
-  SSLVars.lock();
-  this->_SSLVars[key] = arguments;
-  SSLVars.unlock();
-
-  //Prepare the socket to begin accepting connections
-  if(key == this->_ictr)
-    prepareSocket(key, port);
+  this->_sockets.push_back(sock);
 
   return (*this);
 }
 
-void sock::SocketServer::prepareSocket(int key, int port)
+sock::SocketServer& sock::SocketServer::addListeningPort(int port)
 {
-  //Create socket and save value
-  int fd = socket(AF_INET, SOCK_STREAM, 0);
-  base::AutoMutex<std::mutex> fdMutex(this->_fileDescriptorsMutex);
-  _fileDescriptors[key] = fd;
-  fdMutex.unlock();
-
-
-
-  //Create and fill out an address structure
-  struct sockaddr_in* addr = NULL;
-  try
-  {
-    addr = new struct sockaddr_in;
-    memset((void*) addr, 0, sizeof(struct sockaddr_in));
-  }
-  catch(std::bad_alloc& e)
-  {
-    close(fd);
-    fdMutex.lock();
-    this->_fileDescriptors.erase(key);
-    fdMutex.unlock();
-    base::AutoMutex<std::mutex> listMtx(this->_listeningPortsMutex);
-    this->_listeningPorts.erase(key);
-    listMtx.unlock();
-    base::AutoMutex<std::mutex> ssmtx(this->_SSLVarsMutex);
-    this->_SSLVars.erase(key);
-    ssmtx.unlock();
-
-    this->_ictr--;
-
-    throw EXCEPTION("Unable to allocate memory!", -1);
-  }
-
-  addr->sin_addr.s_addr = INADDR_ANY;
-  addr->sin_family = AF_INET;
-  addr->sin_port = htons(port);
-  base::AutoMutex<std::mutex> addressMutex(this->_addressesMutex);
-  this->_addresses[key] = (void*) addr;
-  addressMutex.unlock();
-
-
-
-  //Set SO_REUSEADDR to true; Makes for painless debugging/etc.
-#ifdef _WIN32
-typedef char sso_tp;
-#else
-typedef const void sso_tp;
-#endif
-
-  int reuseAddress = 1;
-  if(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (sso_tp*) &reuseAddress, sizeof(int)) < 0)
-  {
-    fprintf(stderr, "Unable to set SO_REUSEADDR to socket; PORT: [%d]; FD: [%d]\n", port, fd);
-  }
-
-  //Bind the address structure to the socket
-  int ret = bind(fd, (struct sockaddr*) addr, sizeof(struct sockaddr_in));
-  if(ret < 0)
-  {
-    close(fd);
-    fdMutex.lock();
-    this->_fileDescriptors.erase(key);
-    fdMutex.unlock();
-    base::AutoMutex<std::mutex> listMtx(this->_listeningPortsMutex);
-    this->_listeningPorts.erase(key);
-    listMtx.unlock();
-    base::AutoMutex<std::mutex> ssmtx(this->_SSLVarsMutex);
-    this->_SSLVars.erase(key);
-    ssmtx.unlock();
-
-    this->_ictr--;
-    throw EXCEPTION("Unable to bind socket to address/port. Please check to make sure that the port is open, not in use, and allowed by your firewall!", ret);
-  }
-
-  if(!SOCKET_NOERROR(listen(fd, TCPQUEUESIZE)))
-  {
-    close(fd);
-    fdMutex.lock();
-    this->_fileDescriptors.erase(key);
-    fdMutex.unlock();
-    base::AutoMutex<std::mutex> listMtx(this->_listeningPortsMutex);
-    this->_listeningPorts.erase(key);
-    listMtx.unlock();
-    base::AutoMutex<std::mutex> ssmtx(this->_SSLVarsMutex);
-    this->_SSLVars.erase(key);
-    ssmtx.unlock();
-
-    this->_ictr--;
-
-    throw EXCEPTION("Unable to listen to socket! FATAL!", errno);
-  }
+  return this->addListeningPort(port, sock::SSLArguments());
 }
 
 
@@ -302,132 +340,160 @@ void sock::SocketServer::whenPortIsAssigned(int port)
   fprintf(stdout, "Default server created with port, [%d]\n", port);
 }
 
+void sock::SocketServer::incomingConnection(sock::OutConnection* conn)
+{
+  conn->write("Hello World!\n");
+}
 
+static int sizeof_si = sizeof(struct sockaddr_in);
 
 void sock::SocketServer::accepter()
 {
-  fd_set descriptors;
-
-  base::AutoMutex<std::mutex> fdmtx(this->_fileDescriptorsMutex);
-  std::map<int, int> lmap = this->_fileDescriptors;
-  fdmtx.unlock();
-
-  FD_ZERO(&descriptors);
-
-  for(std::map<int, int>::const_iterator it = lmap.begin(); it != lmap.end(); ++it)
+  //Create the FD set
+  fd_set fds;
+  int maxfd = this->_target_pipe;
+  FD_ZERO(&fds);
+  for(size_t i = 0; i < this->_sockets.size(); i++)
   {
-    FD_SET(it->second, &descriptors);
+    FD_SET(this->_sockets[i].fd, &fds);
+    if(this->_sockets[i].fd > maxfd)
+      maxfd = this->_sockets[i].fd;
   }
 
-  struct timeval timeout;
+  FD_SET(this->_target_pipe, &fds);
 
   while(true)
   {
-    //Store all the sockets we are listening on
-    fd_set desc = descriptors;
-    timeout = select_timeout;
+    //Back up stuff. select gobbles up things
+    fd_set descriptors = fds;
+    struct timeval timeout = select_timeout;
+    int ret = select(maxfd + 1, &descriptors, NULL, NULL, &timeout);
 
-    //Wait for one of the sockets to get ready
-    sock::SOCK_RW_RET ret = select(lmap.size(), &desc, NULL, NULL, &timeout);
-    if(ret <= 0)
+    //Timeout
+    if(ret == 0)
+      continue;
+
+    else if(!SOCKET_NOERROR(ret))
     {
-      //Check for any errors or timeouts. EINTR or timeout mean that we would like to rescan for
-      //new ports
-      if(errno == EINTR || ret == 0)
+      if(errno == EINTR || errno == EINVAL || errno == ENOMEM)
       {
-        fdmtx.lock();
-        bool x = lmap == this->_fileDescriptors;
-        lmap = this->_fileDescriptors;
-        fdmtx.unlock();
-
-        if(lmap.size() == 0 || lmap.empty())
-        {
-          FD_ZERO(&descriptors);
-          return;
-        }
-
-        if(!x)
-        {
-          lmap.clear();
-          fdmtx.lock();
-          lmap = this->_fileDescriptors;
-          fdmtx.unlock();
-          FD_ZERO(&descriptors);
-
-          for(std::map<int, int>::const_iterator it = lmap.begin(); it != lmap.end(); ++it)
-          {
-            FD_SET(it->second, &descriptors);
-          }
-        }
+        FD_ZERO(&fds);
+        break;
       }
-      else //Handle some other [possibly fatal] error! :(
+      else
       {
-        /****************************************
-         *+-----------------------------------++*
-         *|    ^													 	  ||*
-         *|   / \														  ||*
-         *|  / | \  !!!IMPLEMENT!!! IMPORTANT!||*
-         *| /  .  \													  ||*
-         *| ```````
-         *+===================================++*
-         ****************************************/
+        continue;
       }
     }
-    else
+
+    for(size_t i = 0; i < this->_sockets.size(); i++)
     {
-      for(std::map<int, int>::const_iterator it = lmap.begin(); it != lmap.end(); ++it)
+      //Find ready connection
+      if(FD_ISSET(this->_sockets[i].fd, &descriptors))
       {
-        if(FD_ISSET(it->second, &desc))
+        //Accept ready connection
+        OutConnection* connection = new (std::nothrow) OutConnection;
+        if(connection == NULL) break;
+
+        connection->FileDescriptor() = accept(
+              this->_sockets[i].fd,
+              (struct sockaddr*) connection->LocalAddress(),
+              (socklen_t*) &sizeof_si
+        );
+        if(connection->FileDescriptor() < 0)
         {
-          base::AutoMutex<std::mutex> nmc_m(this->_connectedClientsMutex);
-          while(true)
-          {
-            nmc_m.lock();
-            size_t nmc = this->_nMaxConnectedClients;
-            size_t cc = this->_nConnectedClients;
-            nmc_m.unlock();
-
-            if(nmc == 0 || cc < nmc) break;
-          }
-
-          nmc_m.lock();
-          this->_nConnectedClients++;
-          nmc_m.unlock();
-
-          sock::OutConnection* conn;
-          while(true)
-          {
-            try
-            {
-              conn = new sock::OutConnection;
-              break;
-            }
-            catch(std::bad_alloc&)
-            {
-            }
-          }
-
-          int ss = sizeof(struct sockaddr_in);
-          conn->FileDescriptor() = accept(it->second, (struct sockaddr*) conn->LocalAddress(), (socklen_t*) &ss);
-          if(conn->FileDescriptor() < 0)
-          {
-            if(errno == EBADF || errno == ECONNABORTED || errno == EINVAL)
-            {
-              delete conn;
-              FD_ZERO(&descriptors);
-              return;
-            }
-
-            if(errno == EAGAIN || errno == EFAULT || errno == EWOULDBLOCK || errno == EMFILE || errno == ENFILE || errno == ENOBUFS || errno == ENOMEM || errno == EOPNOTSUPP || errno == EPROTO || errno == EPERM)
-            {
-              delete conn;
-              break;
-            }
-          }
-
+          perror("Accept failed");
+          delete connection;
           break;
+        }
+
+        connection->Ssl() = NULL;
+        if(this->_sockets[i].arguments.SSLEnable)
+        {
+          connection->Ssl() = (void*) SSL_new((SSL_CTX*) this->_sockets[i].SSLContext);
+          SSL_set_fd((SSL*) connection->Ssl(), this->_sockets[i].fd);
+        }
+
+        std::thread(&sock::SocketServer::runner, this, connection).detach();
+      }
+    }
+
+    if(FD_ISSET(this->_target_pipe, &descriptors))
+    {
+      fprintf(stdout, "Exiting...\n");
+      for(size_t i = 0; i < this->_sockets.size(); i++)
+      {
+        if(this->_sockets[i].address == NULL)
+        {
+          delete (struct sockaddr_in*) this->_sockets[i].address;
+        }
+
+        close(this->_sockets[i].fd);
+        if(this->_sockets[i].arguments.SSLEnable == true)
+        {
+          SSL_CTX_free((SSL_CTX*) this->_sockets[i].SSLContext);
         }
       }
     }
   }
 }
+
+void sock::SocketServer::runner(void* connection)
+{
+  try
+  {
+    this->incomingConnection((sock::OutConnection*) connection);
+  }
+  catch(std::exception&)
+  {}
+
+  sock::OutConnection* conn = (sock::OutConnection*) connection;
+  if(conn->Ssl() != NULL)
+  {
+    SSL_free((SSL*) conn->Ssl());
+  }
+  delete (sock::OutConnection*) connection;
+}
+
+
+void sock::initSSL()
+{
+  SSL_load_error_strings();
+  SSL_library_init();
+  OpenSSL_add_all_algorithms();
+}
+
+void sock::destSSL()
+{
+  ERR_free_strings();
+  EVP_cleanup();
+}
+
+void sock::initialize()
+{
+  sock::initializeSockets();
+  sock::initSSL();
+}
+
+void sock::deinitialize()
+{
+  sock::destSSL();
+  sock::deinitializeSockets();
+}
+
+void sock::SocketServer::shutdownSSL(void* SSL_var)
+{
+  SSL_shutdown((SSL*) SSL_var);
+  SSL_free((SSL*) SSL_var);
+}
+
+
+  /****************************************
+   *+-----------------------------------++*
+   *|    ^													 	  ||*
+   *|   / \														  ||*
+   *|  / | \  !!!IMPLEMENT!!! IMPORTANT!||*
+   *| /  .  \													  ||*
+   *| ```````
+   *+===================================++*
+   ****************************************/

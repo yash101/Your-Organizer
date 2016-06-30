@@ -10,14 +10,14 @@
 #include <errno.h>
 #include <netinet/in.h>
 #include <unistd.h>
-#define SOCKET_VALID(fd) (fd < 0)
+#define SOCKET_INVALID(fd) (fd < 0)
 #define SOCKET_NOERROR(x) (x > 0)
 #define FD_INITIALIZER -1
 
 #else
 
 #include <Windows.h>
-#define SOCKET_VALID(fd) (fd != INVALID_SOCKET)
+#define SOCKET_INVALID(fd) (fd == INVALID_SOCKET)
 #define SOCKET_NOERROR(x) (x != SOCKET_ERROR)
 #define FD_INITIALIZER INVALID_SOCKET
 
@@ -39,6 +39,17 @@ sock::Connection::~Connection()
   if(_address != NULL) delete (struct sockaddr_in*) _address;
   if(_remoteAddress != NULL) delete (struct sockaddr_in*) _remoteAddress;
   if(_timeout != NULL) delete (struct timeval*) _timeout;
+
+  if(!SOCKET_INVALID(_fd))
+  {
+#ifdef _WIN32
+    shutdown(_fd, SHUT_BOTH);
+    closesocket(_fd);
+#else
+    shutdown(_fd, SHUT_RDWR);
+    close(_fd);
+#endif
+  }
 }
 
 
@@ -81,8 +92,10 @@ sock::SOCK_RW_RET sock::Connection::write_int(void* buf, size_t len, int flags)
       if(ret < (SOCK_RW_RET) len && ret >= 0)
         buffer += ret / sizeof(char);
     }
-
-    return ret;
+    else
+    {
+      return ret;
+    }
   }
 }
 
