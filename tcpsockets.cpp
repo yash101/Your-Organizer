@@ -137,8 +137,8 @@ void sock::SocketServer::initializeVariables()
     throw EXCEPTION("Unable to create IPC Pipe!", errno);
   }
 
-  this->_signaler_pipe = pipes[0];
-  this->_target_pipe = pipes[1];
+  this->_signaler_pipe = pipes[1];
+  this->_target_pipe = pipes[0];
 }
 
 
@@ -423,7 +423,7 @@ void sock::SocketServer::accepter()
       fprintf(stdout, "Exiting...\n");
       for(size_t i = 0; i < this->_sockets.size(); i++)
       {
-        if(this->_sockets[i].address == NULL)
+        if(this->_sockets[i].address != NULL)
         {
           delete (struct sockaddr_in*) this->_sockets[i].address;
         }
@@ -434,6 +434,8 @@ void sock::SocketServer::accepter()
           SSL_CTX_free((SSL_CTX*) this->_sockets[i].SSLContext);
         }
       }
+
+      return;
     }
   }
 }
@@ -487,6 +489,14 @@ void sock::SocketServer::shutdownSSL(void* SSL_var)
   SSL_free((SSL*) SSL_var);
 }
 
+
+//Who doesn't love some artwork? :)
+//      ___    ___
+//     [ ^ ]  [ ^ ]
+//     `````/\`````
+//      \``|``|``/
+//       \_|__|_/
+//
 
   /****************************************
    *+-----------------------------------++*

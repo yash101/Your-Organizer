@@ -4,6 +4,7 @@ CONFIG -= app_bundle
 CONFIG -= qt
 LIBS += -pthread -lpthread
 LIBS += -lssl -lcrypto
+LIBS += -lboost_system -lboost_thread
 
 
 SOURCES += main.cpp \
