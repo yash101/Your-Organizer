@@ -30,6 +30,7 @@
 
 # QT Creator
 *.user
+*.autosave
 
 # VIM
 *.swo
@@ -37,3 +38,4 @@
 
 # Mac
 .DS_Store
+
