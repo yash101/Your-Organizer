@@ -38,5 +38,4 @@ namespace sock
     short getPort();
   };
 }
-
 #endif // TCPSERVER_H

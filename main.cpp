@@ -1,7 +1,9 @@
 #include "tcpserver.h"
+#include "config.h"
+#include <postgresql/libpq-fe.h>
+#include <iostream>
 
 int main()
 {
-  sock::TcpServer server;
-  server.start();
+  conf::init();
 }

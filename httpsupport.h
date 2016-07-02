@@ -1,0 +1,4 @@
+#ifndef HTTPSUPPORT_H
+#define HTTPSUPPORT_H
+
+#endif // HTTPSUPPORT_H
