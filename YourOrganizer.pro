@@ -25,3 +25,6 @@ HEADERS += \
     database/database_basics.h \
     httpserver.h \
     httpsupport.h
+
+DISTFILES += \
+    CONFIGURATION.md
