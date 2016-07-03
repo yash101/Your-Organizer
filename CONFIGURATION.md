@@ -1,10 +1,9 @@
 # Server main configuration file
-This server is designed to be compiled once and reconfigured
-Most options can be reconfigured with a simple server restart
+This server is designed to be compiled once and reconfigured. Most options can be reconfigured with a simple server restart. The configuration file is in an xml(-like) format. Below is the documentation for all configuration file field values.
 ---
 
 ### The default location for the configuration file is "configuration.xml" in the working directory of the server.
-To override the default location for the configuration file, define CONFIGURATION_FILE_LOCATION as a C String, as a compile option, or edit the default value in "/config.h"
+To override the default location for the configuration file, define ```CONFIGURATION_FILE_LOCATION``` as a __C String__, as a compile option (```-DCONFIGURATION_FILE_LOCATION="{whatever}"```), or edit the default value in ```/config.h```
 
 ---
 
