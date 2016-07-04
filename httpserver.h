@@ -14,24 +14,27 @@ namespace http
   class DataSource;
 
   typedef boost::asio::ip::tcp::socket Socket;
-  typedef uint16_t HttpOptions;
+  typedef uint32_t HttpOptions;
 
   //16-bit bitfield containing Http options
   //Contains socket information as well as request information
-  const static HttpOptions Http1_0 = 0x8000;
-  const static HttpOptions Http1_1 = 0x4000;
-  const static HttpOptions Http2_0 = 0x2000;
-  const static HttpOptions Spdy = 0x1000;
-  const static HttpOptions SslEnabled = 0x800;
-  const static HttpOptions CompressionEnabled = 0x400;
-  const static HttpOptions Websockets = 0x200;
-  const static HttpOptions GetRequest = 0x100;
-  const static HttpOptions PostRequest = 0x80;
-  const static HttpOptions PutRequest = 0x40;
-  const static HttpOptions DeleteRequest = 0x20;
-  const static HttpOptions ConnectRequest = 0x10;
-  const static HttpOptions OptionsRequest = 0x8;
-  const static HttpOptions TraceRequest = 0x4;
+  const static HttpOptions Http1_0 = 0x80000000;
+  const static HttpOptions Http1_1 = 0x40000000;
+  const static HttpOptions Http2_0 = 0x20000000;
+  const static HttpOptions Spdy = 0x10000000;
+  const static HttpOptions SslEnabled = 0x8000000;
+  const static HttpOptions CompressionEnabled = 0x4000000;
+  const static HttpOptions Websockets = 0x2000000;
+  const static HttpOptions GetRequest = 0x1000000;
+  const static HttpOptions PostRequest = 0x800000;
+  const static HttpOptions PutRequest = 0x400000;
+  const static HttpOptions DeleteRequest = 0x200000;
+  const static HttpOptions ConnectRequest = 0x100000;
+  const static HttpOptions OptionsRequest = 0x80000;
+  const static HttpOptions TraceRequest = 0x40000;
+  const static HttpOptions HttpKeepalive = 0x20000;
+  const static HttpOptions PostUrlencoded = 0x8000;
+  const static HttpOptions PostMultipart = 0x4000;
 
   class DataSource
   {
@@ -48,6 +51,8 @@ namespace http
     {}
   };
 
+  HttpOptions getRequestType(std::string reqstr);
+  HttpOptions getRequestProtocol(std::string reqstr);
 
   class HttpSession
   {
@@ -100,7 +105,9 @@ namespace http
     void parseHttpRequest(boost::shared_ptr<Socket> sock);
     void processRequest(HttpSession& session);
       void parseGetQueries(HttpSession& session);
+      void parseHeaders(HttpSession& session);
       void parsePostQueries(HttpSession& session);
+
     void checkRequest(HttpSession& session);
     void prepareSession(HttpSession& session);
 

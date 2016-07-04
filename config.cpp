@@ -4,9 +4,12 @@
 #include <vector>
 
 tinyxml2::XMLDocument conf::config;
+static bool inited = false;
 
 void conf::init()
 {
+  if(inited) return;
+  inited = true;
   config.LoadFile(CONFIGURATION_FILE_LOCATION);
 }
 
@@ -19,10 +22,12 @@ std::string conf::getConfigString(std::string path)
     return "";
 
   tinyxml2::XMLElement* element = config.FirstChildElement(bpath[0].c_str());
+  if(element == NULL) return "";
 
   for(size_t i = 1; i < bpath.size(); i++)
   {
     element = element->FirstChildElement(bpath[i].c_str());
+    if(element == NULL) return "";
   }
 
   return std::string(element->FirstChild()->ToText()->Value());

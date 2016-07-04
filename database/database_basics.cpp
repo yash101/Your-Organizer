@@ -71,8 +71,8 @@ void db::releaseDatabaseConnection(PGconn* connection)
 
 void db::init()
 {
-  maxActiveConnections = conf::getConfigInt("database settings maxconcurrentconnections");
-  dbname = conf::getConfigString("database authentication dbname");
+  maxActiveConnections = conf::getConfigInt("database settings maximum_concurrent_connections");
+  dbname = conf::getConfigString("database authentication database_name");
   dbhost = conf::getConfigString("database authentication host");
   dbport = conf::getConfigString("database authentication port");
   duname = conf::getConfigString("database authentication username");
