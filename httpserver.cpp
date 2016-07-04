@@ -6,6 +6,7 @@
 #include <boost/algorithm/string.hpp>
 
 #include <sstream>
+#include <time.h>
 
 #define me (*this)
 
@@ -83,6 +84,10 @@ void http::HttpServer::parseHttpRequest(boost::shared_ptr<http::Socket> socket)
 
   //Process the request
   me.processRequest(session);
+  me.checkRequest(session);
+  me.prepareSession(session);
+  me.workerFunction(session);
+  me.sendResponse(session);
 }
 
 //Processes the request. Runs the functions, one after the other
@@ -204,8 +209,8 @@ void http::HttpServer::parseHeaders(http::HttpSession& session)
       if(key == "cookie")
       {
         i--;
-        dcookes++;
-        if(dcookies > vars::max_ncookies);
+        dcookies++;
+        if(dcookies > vars::max_ncookies) throw EXCEPTION("Maximum number of cookies downloaded. Cannot download more!", 413);
         //Parse the cookie! (Nom num nom)
         size_t cpos = value.find('=');
         if(cpos == std::string::npos)
@@ -248,7 +253,7 @@ void http::HttpServer::parsePostQueries(http::HttpSession& session)
   }
   else	//General POST request
   {
-    size_t length = std::atoll(session.incoming_headers["content-length"]);
+    size_t length = std::atoll(session.incoming_headers["content-length"].c_str());
     if(length > vars::max_postlen)
       throw EXCEPTION("Cannot handle this much POST data! Asset too large for processing!", 413);
     std::vector<std::string> queries;
@@ -301,6 +306,40 @@ void http::HttpServer::checkRequest(http::HttpSession& session)
 }
 
 
+//Sets default values for important fields
+void http::HttpServer::prepareSession(http::HttpSession& session)
+{
+  session.outgoing_headers["content-type"] = "text/html";
+  session.status_code = 200;
+}
+
+
+//Check to make sure the session worker handled all required tasks and add anything else
+void http::HttpServer::checkSessionResponse(http::HttpSession& session)
+{
+  if(session.outgoing_headers.find("content-type") == session.outgoing_headers.end())
+  {
+    session.outgoing_headers["content-type"] = "octet/stream";
+  }
+
+  if(session.response.type == http::DataSource::NoData)
+  {
+    session.outgoing_headers["content-length"] = "0";
+  }
+
+  session.outgoing_headers["date"] = http::timestamp();
+}
+
+//Send response
+void http::HttpServer::sendResponse(http::HttpSession& session)
+{
+  if(session.information & http::Http1_0)
+  {
+    boost::asio::write(*session.socket, boost::asio::buffer("HTTP/1.0 " + boost::to_string(session.status_code) + " " + session.status_string + "\r\n"));
+  }
+}
+
+
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /* HttpSession functions */
 
@@ -343,6 +382,31 @@ http::HttpOptions http::getRequestProtocol(std::string reqstr)
   else if(reqstr == "HTTP/1.1") return http::Http1_1;
   else if(reqstr == "HTTP/2.0") return http::Http2_0;
   else throw EXCEPTION(std::string("Error: Protocol requested (" + reqstr + ") not supported!").c_str(), 505);
+}
+
+static const char* const days[] =
+{ "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+static const char* const months[] =
+{ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+
+std::string http::timestamp()
+{
+  time_t localtime;
+  struct tm* tme;
+  localtime = time(NULL);
+  tme = gmtime(&localtime);
+
+  std::stringstream str;
+  str << days[tme->tm_wday]
+      << ", "
+      << tme->tm_mday << " "
+      << months[tme->tm_mon] << " "
+      << tme->tm_year + 1900 << " "
+      << tme->tm_hour << ":"
+      << tme->tm_min << ":"
+      << tme->tm_sec << " GMT";
+
+  return str.str();
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

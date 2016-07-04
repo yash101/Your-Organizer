@@ -15,6 +15,7 @@ namespace http
 
   typedef boost::asio::ip::tcp::socket Socket;
   typedef uint32_t HttpOptions;
+  typedef void (*HttpServerWorkerFunction)(HttpSession&);
 
   //16-bit bitfield containing Http options
   //Contains socket information as well as request information
@@ -75,6 +76,7 @@ namespace http
     boost::unordered_map<std::string, std::string> outgoing_cookies;
 
     short int status_code;
+    std::string status_string;
 
     DataSource response;
 
@@ -124,7 +126,12 @@ namespace http
 
     short getPort();
     short setPort(short listeningPort);
+
+    HttpServerWorkerFunction workerFunction;
   };
+
+
+  std::string timestamp();
 }
 
 #endif // HTTPSERVER_H
