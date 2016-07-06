@@ -163,6 +163,16 @@ int HttpServer::processHeaders(HttpSession& session)
     else
     {
       boost::trim(parts[1]);
+      if(parts[0] == "cookie")
+      {
+        std::vector<std::string> cookie_bits = base::splitByFirstDelimiter(parts[1], "=");
+        if(cookie_bits.size() == 1)
+          session.incoming_cookies[cookie_bits[0]] = "";
+        else
+        {
+          session.incoming_cookies[cookie_bits[0]] = cookie_bits[1];
+        }
+      }
       session.incoming_headers[parts[0]] = parts[1];
     }
   }

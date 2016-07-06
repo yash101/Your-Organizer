@@ -61,7 +61,6 @@ int TcpServer::startServer()
 }
 
 static const int sizeof_struct_sockaddr_in6 = sizeof(struct sockaddr_in6);
-static const int sizeof_timeoutStruct = sizeof(struct timeval);
 
 int TcpServer::acceptor()
 {
@@ -114,8 +113,8 @@ int TcpServer::acceptor()
       memcpy(connection->_timeoutStructure, me._timeoutStructure, sizeof(struct timeval));
       timeoutMutex.unlock();
 
-      setsockopt(connection->_fileDescriptor, SOL_SOCKET, SO_SNDTIMEO, connection->_timeoutStructure, &sizeof_timeoutStruct);
-      setsockopt(connection->_fileDescriptor, SOL_SOCKET, SO_RCVTIMEO, connection->_timeoutStructure, &sizeof_timeoutStruct);
+      setsockopt(connection->_fileDescriptor, SOL_SOCKET, SO_SNDTIMEO, (sso_tp*) connection->_timeoutStructure, (socklen_t) sizeof(struct timeval));
+      setsockopt(connection->_fileDescriptor, SOL_SOCKET, SO_RCVTIMEO, (sso_tp*) connection->_timeoutStructure, (socklen_t) sizeof(struct timeval));
 
       getpeername(connection->_fileDescriptor, (struct sockaddr*) connection->_addressStructure, (socklen_t*) &sizeof_struct_sockaddr_in6);
     }
@@ -134,7 +133,7 @@ void TcpServer::workerProxy(TcpServerConnection* connection)
   }
   catch(std::exception& e)
   {
-    fprintf(stderr, e.what());
+    fprintf(stderr, "An error ocurred: [%s]\n", e.what());
   }
   delete connection;
 }
