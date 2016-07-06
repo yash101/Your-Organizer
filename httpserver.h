@@ -124,8 +124,8 @@ namespace http
   protected:
 
     virtual void requestHandler(HttpSession& session);
-    virtual void websocketInit(WebsocketsSession& session);
-    virtual void websocketWorker(WebsocketSession& session);
+    virtual void websocketInit(HttpSession& session);
+    virtual void websocketWorker(WebsocketsSession& session);
 
   public:
 

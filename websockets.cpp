@@ -7,7 +7,7 @@ int HttpServer::initializeWebsockets(HttpSession& session, WebsocketsSession& ws
 {
   //Set the connection variables
   wsession.connection = session.connection;
-  wsession.httpSession = session;
+  wsession.httpSession = &session;
   wsession.websocketKey = session.incoming_headers["sec-websocket-key"];
   if(wsession.websocketKey.size() == 0) throw HTTPEXCEPT("Invalid WebSocket request! No \"Sec-Websocket-Key\" header present", 400, 400);
 
@@ -17,8 +17,17 @@ int HttpServer::initializeWebsockets(HttpSession& session, WebsocketsSession& ws
   //Complete the handshake and establish connection
 }
 
-int HttpServer::websocketHandshake(HttpSession& session, WebsocketsSession& session)
+int HttpServer::websocketHandshake(HttpSession& session, WebsocketsSession& wsession)
 {
   //Send the first few headers
   session.connection->write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: upgrade\r\n");
+}
+
+
+void HttpServer::websocketInit(HttpSession& session)
+{
+}
+
+void HttpServer::websocketWorker(WebsocketsSession& session)
+{
 }

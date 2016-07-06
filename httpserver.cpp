@@ -79,7 +79,7 @@ void HttpServer::worker(srv::TcpServerConnection& connection)
     if(ret & Websockets)
     {
       WebsocketsSession wses;
-      ret = me.initializeWebsockets(session);
+      ret = me.initializeWebsockets(session, wses);
     }
 
     ret = me.processPostQueries(session);
