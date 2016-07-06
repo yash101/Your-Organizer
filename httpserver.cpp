@@ -57,11 +57,13 @@ namespace vars
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /* Server functions */
 
+//Initializes the web server
 HttpServer::HttpServer()
 {
   vars::init();
 }
 
+//Runs the entire web server. In charge of making sure everything happens :)
 void HttpServer::worker(srv::TcpServerConnection& connection)
 {
   HttpSession session;
@@ -69,21 +71,30 @@ void HttpServer::worker(srv::TcpServerConnection& connection)
   session.connection = &connection;
   int ret = 0;
 
-  ret = me.processRequestLine(session);
-  ret = me.processHeaders(session);
-  ret = me.processPostQueries(session);
+  while(true)
+  {
+    ret = me.processRequestLine(session);
+    ret = me.processHeaders(session);
 
-  ret = me.checkRequest(session);
-  ret = me.prepareSession(session);
+    if(ret & Websockets)
+    {
+      WebsocketsSession wses;
+      ret = me.initializeWebsockets(session);
+    }
 
-  me.requestHandler(session);
+    ret = me.processPostQueries(session);
 
-  ret = me.checkResponse(session);
-  ret = me.sendResponse(session);
+    ret = me.checkRequest(session);
+    ret = me.prepareSession(session);
 
-  if(ret < 0) return;
+    me.requestHandler(session);
+
+    ret = me.checkResponse(session);
+    ret = me.sendResponse(session);
+  }
 }
 
+//Processes the request line (e.g.: "GET / HTTP/1.1\r\n"
 int HttpServer::processRequestLine(HttpSession& session)
 {
   std::string fline = session.connection->readline('\n', vars::maxlen_firstline);
@@ -103,6 +114,8 @@ int HttpServer::processRequestLine(HttpSession& session)
   return session.information;
 }
 
+//Processes the URL argument in the request line, and extracts any
+//GET queries
 void HttpServer::processRequestUrl(HttpSession& session)
 {
   std::vector<std::string> parts = base::splitByFirstDelimiter(session.path_unprocessed, "?");
@@ -138,6 +151,10 @@ void HttpServer::processRequestUrl(HttpSession& session)
   }
 }
 
+//Downloads and processes all headers from the clients
+//Processes incoming cookies
+//Returns http::Websockets if websockets are requested otherwise,
+//returns 0
 int HttpServer::processHeaders(HttpSession& session)
 {
   size_t i = 0;
@@ -189,6 +206,8 @@ int HttpServer::processHeaders(HttpSession& session)
   return 0;
 }
 
+//Processes the body of the request and pulls out POST queries
+//Multipart not supported yet. Need to add detection/support
 int HttpServer::processPostQueries(HttpSession& session)
 {
   if(!(session.information & PostRequest)) return 0;
@@ -228,6 +247,7 @@ int HttpServer::processPostQueries(HttpSession& session)
   return 0;
 }
 
+//Checks to make sure the request is valid, as per HTTP spec
 int HttpServer::checkRequest(HttpSession& session)
 {
   if(session.information & Http1_1 || session.information & Http2_0)
@@ -240,6 +260,7 @@ int HttpServer::checkRequest(HttpSession& session)
   return 0;
 }
 
+//Prepares the session. Sets initial variables
 int HttpServer::prepareSession(HttpSession& session)
 {
   session.outgoing_headers["content-type"] = "text/html";
@@ -247,6 +268,7 @@ int HttpServer::prepareSession(HttpSession& session)
   return 0;
 }
 
+//Checks the response and makes sure we don't end up duplicating any variables
 int HttpServer::checkResponse(HttpSession& session)
 {
   if(session.outgoing_headers.find("date") != session.outgoing_headers.end()) session.outgoing_headers.erase("date");
@@ -276,6 +298,7 @@ public:
   }
 };
 
+//Returns the HTTP response
 int HttpServer::sendResponse(HttpSession& session)
 {
   FileLock lock;
@@ -319,6 +342,7 @@ int HttpServer::sendResponse(HttpSession& session)
   return 0;
 }
 
+//Handles requests (supposed to be overridden using inheritance)
 void HttpServer::requestHandler(HttpSession& session)
 {
   session.response.type = DataSource::String;

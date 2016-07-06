@@ -7,6 +7,7 @@
 namespace base
 {
   std::vector<std::string> splitByFirstDelimiter(std::string str, std::string find);
+  std::string SHA1Hash(std::string in);
 }
 
 #endif // STRING_ALGORITHMS_H

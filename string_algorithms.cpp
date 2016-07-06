@@ -1,5 +1,9 @@
 #include "string_algorithms.h"
 
+#include <sstream>
+
+#include <openssl/sha.h>
+
 std::vector<std::string> base::splitByFirstDelimiter(std::string str, std::string find)
 {
   std::vector<std::string> ret;
@@ -21,4 +25,12 @@ std::vector<std::string> base::splitByFirstDelimiter(std::string str, std::strin
     ret.push_back(str.substr(f + find.size(), str.size()));
     return ret;
   }
+}
+
+std::string base::SHA1Hash(std::string in)
+{
+  unsigned char hash[SHA_DIGEST_LENGTH + 1];
+  hash[SHA_DIGEST_LENGTH] = '\0';
+  SHA1(in.c_str(), in.size(), hash);
+  return std::string(hash);
 }

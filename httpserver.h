@@ -53,6 +53,7 @@ namespace http
   HttpOptions getRequestProtocol(std::string reqstr);
   std::string getRequestProtocol(HttpOptions options);
   std::string getStatusString(int code);
+  std::string timestamp();
 
   class HttpSession
   {
@@ -85,6 +86,20 @@ namespace http
     const DataSource getQueryPost(std::string key);
   };
 
+  class WebsocketsSession
+  {
+    friend class HttpServer;
+
+  private:
+
+    srv::TcpServerConnection* connection;
+    HttpSession* httpSession;
+    std::string websocketKey;
+    int websocketVersion;
+
+  public:
+  };
+
 
   class HttpServer : public srv::TcpServer
   {
@@ -97,6 +112,8 @@ namespace http
     int processPostQueries(HttpSession& session);
 
     //WebSocket stuff
+    int initializeWebsockets(HttpSession& session, WebsocketsSession& wsession);
+    int websocketHandshake(HttpSession& session, WebsocketsSession& wsession);
 
     //HTTP Stuff
     int checkRequest(HttpSession& session);
@@ -107,14 +124,13 @@ namespace http
   protected:
 
     virtual void requestHandler(HttpSession& session);
+    virtual void websocketInit(WebsocketsSession& session);
+    virtual void websocketWorker(WebsocketSession& session);
 
   public:
 
     HttpServer();
   };
-
-
-  std::string timestamp();
 }
 
 #endif // HTTPSERVER_H

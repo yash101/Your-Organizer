@@ -16,7 +16,8 @@ SOURCES += main.cpp \
     httpserver.cpp \
     tcpserver_internals.cpp \
     http_internals.cpp \
-    string_algorithms.cpp
+    string_algorithms.cpp \
+    websockets.cpp
 
 HEADERS += \
     exceptions.h \
