@@ -1,6 +1,6 @@
 #ifndef DEFAULTCONFIGURATION_H
 #define DEFAULTCONFIGURATION_H
-#include "tinyxml2.h"
+#include "../libraries/tinyxml2.h"
 #include <string>
 
 #ifndef CONFIGURATION_FILE_LOCATION

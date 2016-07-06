@@ -15,6 +15,7 @@ int HttpServer::initializeWebsockets(HttpSession& session, WebsocketsSession& ws
   me.websocketInit(session);
 
   //Complete the handshake and establish connection
+  return 0;
 }
 
 int HttpServer::websocketHandshake(HttpSession& session, WebsocketsSession& wsession)

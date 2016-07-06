@@ -1,6 +1,6 @@
 #include "http_internals.h"
 #include "httpserver.h"
-#include "exceptions.h"
+#include "../base/exceptions.h"
 
 #include <sstream>
 #include <time.h>

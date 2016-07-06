@@ -9,26 +9,28 @@ LIBS += -lpq
 
 
 SOURCES += main.cpp \
-    tcpserver.cpp \
-    tinyxml2.cpp \
-    config.cpp \
+    base/config.cpp \
+    base/string_algorithms.cpp \
     database/database_basics.cpp \
-    httpserver.cpp \
-    tcpserver_internals.cpp \
-    http_internals.cpp \
-    string_algorithms.cpp \
-    websockets.cpp
+    libraries/tinyxml2.cpp \
+    server/http_internals.cpp \
+    server/httpserver.cpp \
+    server/tcpserver.cpp \
+    server/tcpserver_internals.cpp \
+    server/websockets.cpp
 
 HEADERS += \
-    exceptions.h \
-    automaticmutex.h \
-    tcpserver.h \
-    tinyxml2.h \
-    config.h \
+    base/automaticmutex.h \
+    base/config.h \
+    base/exceptions.h \
+    base/string_algorithms.h \
     database/database_basics.h \
-    httpserver.h \
-    http_internals.h \
-    string_algorithms.h
+    libraries/tinyxml2.h \
+    server/http_internals.h \
+    server/httpserver.h \
+    server/tcpserver.h
 
 DISTFILES += \
-    CONFIGURATION.md
+    CONFIGURATION.md \
+    LICENSE \
+    README.md

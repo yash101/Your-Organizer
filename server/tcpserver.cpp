@@ -1,6 +1,6 @@
 #include "tcpserver.h"
-#include "exceptions.h"
-#include "automaticmutex.h"
+#include "../base/exceptions.h"
+#include "../base/automaticmutex.h"
 
 #include <netinet/in.h>
 

@@ -1,6 +1,6 @@
-#include "database_basics.h"
-#include "config.h"
-#include "automaticmutex.h"
+#include "../database/database_basics.h"
+#include "../base/config.h"
+#include "../base/automaticmutex.h"
 
 #include <boost/thread.hpp>
 #include <vector>

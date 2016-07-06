@@ -1,8 +1,8 @@
 #include "httpserver.h"
 #include "http_internals.h"
-#include "exceptions.h"
-#include "config.h"
-#include "string_algorithms.h"
+#include "../base/exceptions.h"
+#include "../base/config.h"
+#include "../base/string_algorithms.h"
 
 #include <boost/algorithm/string.hpp>
 

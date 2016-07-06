@@ -1,5 +1,5 @@
-#include "config.h"
-#include "httpserver.h"
+#include "base/config.h"
+#include "server/httpserver.h"
 
 int main()
 {
