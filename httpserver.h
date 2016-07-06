@@ -2,7 +2,6 @@
 #define HTTPSERVER_H
 #include "tcpserver.h"
 
-#include <boost/asio.hpp>
 #include <boost/unordered_map.hpp>
 
 #include <string>
@@ -13,29 +12,27 @@ namespace http
   class HttpSession;
   class DataSource;
 
-  typedef boost::asio::ip::tcp::socket Socket;
   typedef uint32_t HttpOptions;
   typedef void (*HttpServerWorkerFunction)(HttpSession&);
 
+#define SET_BIT(n)(1 << n)
   //16-bit bitfield containing Http options
   //Contains socket information as well as request information
-  const static HttpOptions Http1_0 = 0x80000000;
-  const static HttpOptions Http1_1 = 0x40000000;
-  const static HttpOptions Http2_0 = 0x20000000;
-  const static HttpOptions Spdy = 0x10000000;
-  const static HttpOptions SslEnabled = 0x8000000;
-  const static HttpOptions CompressionEnabled = 0x4000000;
-  const static HttpOptions Websockets = 0x2000000;
-  const static HttpOptions GetRequest = 0x1000000;
-  const static HttpOptions PostRequest = 0x800000;
-  const static HttpOptions PutRequest = 0x400000;
-  const static HttpOptions DeleteRequest = 0x200000;
-  const static HttpOptions ConnectRequest = 0x100000;
-  const static HttpOptions OptionsRequest = 0x80000;
-  const static HttpOptions TraceRequest = 0x40000;
-  const static HttpOptions HttpKeepalive = 0x20000;
-  const static HttpOptions PostUrlencoded = 0x8000;
-  const static HttpOptions PostMultipart = 0x4000;
+  const static HttpOptions Http1_0 = SET_BIT(1);
+  const static HttpOptions Http1_1 = SET_BIT(2);
+  const static HttpOptions Http2_0 = SET_BIT(3);
+  const static HttpOptions GetRequest = SET_BIT(4);
+  const static HttpOptions PostRequest = SET_BIT(5);
+  const static HttpOptions PutRequest = SET_BIT(6);
+  const static HttpOptions DeleteRequest = SET_BIT(7);
+  const static HttpOptions ConnectRequest = SET_BIT(8);
+  const static HttpOptions OptionsRequest = SET_BIT(9);
+  const static HttpOptions TraceRequest = SET_BIT(10);
+  const static HttpOptions Websockets = SET_BIT(11);
+  const static HttpOptions HttpKeepalive = SET_BIT(12);
+  const static HttpOptions PostUrlencoded = SET_BIT(13);
+  const static HttpOptions PostMultipart = SET_BIT(14);
+#undef SET_BIT
 
   class DataSource
   {
@@ -54,13 +51,14 @@ namespace http
 
   HttpOptions getRequestType(std::string reqstr);
   HttpOptions getRequestProtocol(std::string reqstr);
+  std::string getRequestProtocol(HttpOptions options);
+  std::string getStatusString(int code);
 
   class HttpSession
   {
     friend class HttpServer;
   private:
-    boost::shared_ptr<Socket> socket;
-    boost::asio::streambuf streambuf;
+    srv::TcpServerConnection* connection;
     HttpOptions information;
 
     std::string path;
@@ -77,7 +75,6 @@ namespace http
 
     short int status_code;
     std::string status_string;
-
     DataSource response;
 
     HttpOptions getRequestInformation();
@@ -89,45 +86,31 @@ namespace http
   };
 
 
-  class HttpServer
+  class HttpServer : public srv::TcpServer
   {
   private:
 
-    boost::asio::io_service ioService;
-    short listeningPort;
-    bool isServerRunning;
+    virtual void worker(srv::TcpServerConnection& connection);
+    int processRequestLine(HttpSession& session);
+      void processRequestUrl(HttpSession& session);
+    int processHeaders(HttpSession& session);
+    int processPostQueries(HttpSession& session);
 
-    std::string get_password() const;
-    void acceptor();
-    void runner(boost::shared_ptr<http::Socket> socket);
+    //WebSocket stuff
 
-    std::string readLine(HttpSession& session, size_t len);
+    //HTTP Stuff
+    int checkRequest(HttpSession& session);
+    int prepareSession(HttpSession& session);
+    int checkResponse(HttpSession& session);
+    int sendResponse(HttpSession& session);
 
-    //Prepare for handing HTTP session to the worker function
-    void parseHttpRequest(boost::shared_ptr<Socket> sock);
-    void processRequest(HttpSession& session);
-      void parseGetQueries(HttpSession& session);
-      void parseHeaders(HttpSession& session);
-      void parsePostQueries(HttpSession& session);
+  protected:
 
-    void checkRequest(HttpSession& session);
-    void prepareSession(HttpSession& session);
-
-    //Check and send the response
-    void checkSessionResponse(HttpSession& session);
-    void sendResponse(HttpSession& session);
+    virtual void requestHandler(HttpSession& session);
 
   public:
 
     HttpServer();
-    ~HttpServer();
-
-    void start();
-
-    short getPort();
-    short setPort(short listeningPort);
-
-    HttpServerWorkerFunction workerFunction;
   };
 
 

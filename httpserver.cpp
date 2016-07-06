@@ -1,21 +1,26 @@
 #include "httpserver.h"
-#include "httpsupport.h"
+#include "http_internals.h"
 #include "exceptions.h"
 #include "config.h"
+#include "string_algorithms.h"
 
 #include <boost/algorithm/string.hpp>
 
 #include <sstream>
 #include <time.h>
+#include <stdio.h>
 
 #define me (*this)
+using namespace http;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /* Configuration variables */
 namespace vars
 {
   static size_t maxlen_firstline;	//Maximum number of bytes downloaded in the first line ({METHOD} {URI} HTTP/{v}\r\n)
+  static size_t max_ngetq;				//Maximum number of HTTP GET queries
   static size_t max_hdrct;				//Maximum number of HTTP headers to download
+  static size_t max_hdrlen;
   static size_t max_hdrklen;			//Maximum length of a header key ({key}: {value}\r\n)
   static size_t max_hdrvlen;			//Maximum length of a header value ({key}: {value}\r\n)
   static size_t max_postlen;			//Maximum data to download from POST
@@ -34,11 +39,13 @@ namespace vars
 
     //Set up configuration variables
     maxlen_firstline = conf::getConfigInt("http request request_line maximum_length");
+    max_ngetq = conf::getConfigInt("http request queries get maximum_count");
     max_hdrct = conf::getConfigInt("http request headers maximum_count");
+    max_hdrlen = conf::getConfigInt("http request headers maximum_length");
     max_hdrklen = conf::getConfigInt("http request headers maximum_key_length");
     max_hdrvlen = conf::getConfigInt("http request headers maximum_value_length");
     max_postlen = conf::getConfigInt("http request queries post maximum_count");
-    max_postdata = conf::getConfigInt("http request queries pos maximum_data_usage");
+    max_postdata = conf::getConfigInt("http request queries post maximum_data_usage");
     max_postkeylen = conf::getConfigInt("http request queries post maximum_key_length");
     max_ncookies = conf::getConfigInt("http request cookies maximum_count");
     max_cookiekeylen = conf::getConfigInt("http request cookies maximum_key_length");
@@ -46,414 +53,265 @@ namespace vars
   }
 }
 
+
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/* Server code */
+/* Server functions */
 
-//Starts the server. This function listens for incoming connections
-void http::HttpServer::start()
+HttpServer::HttpServer()
 {
-  if(!vars::isInit) vars::init();
-  boost::asio::ip::tcp::acceptor acceptor(me.ioService, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v6(), me.listeningPort));
-  while(true)
-  {
-    boost::shared_ptr<http::Socket> connection(new http::Socket(me.ioService));
-    acceptor.accept(*connection);
-    boost::thread thread(boost::bind(&http::HttpServer::runner, this, connection));
-  }
+  vars::init();
 }
 
-//This function runs the web server function
-//Makes sure no exceptions get past this. A single exception would cause
-//a full server crash!
-void http::HttpServer::runner(boost::shared_ptr<http::Socket> connection)
+void HttpServer::worker(srv::TcpServerConnection& connection)
 {
-  try
-  {
-    me.parseHttpRequest(connection);
-  }
-  catch(std::exception& e)
-  {}
+  HttpSession session;
+  session.information = 0;
+  session.connection = &connection;
+  int ret = 0;
+
+  ret = me.processRequestLine(session);
+  ret = me.processHeaders(session);
+  ret = me.processPostQueries(session);
+
+  ret = me.checkRequest(session);
+  ret = me.prepareSession(session);
+
+  me.requestHandler(session);
+
+  ret = me.checkResponse(session);
+  ret = me.sendResponse(session);
+
+  if(ret < 0) return;
 }
 
-//The HTTP server. This calls for the request to be parsed
-void http::HttpServer::parseHttpRequest(boost::shared_ptr<http::Socket> socket)
+int HttpServer::processRequestLine(HttpSession& session)
 {
-  //Create the session object
-  http::HttpSession session;
-  session.socket = socket;
+  std::string fline = session.connection->readline('\n', vars::maxlen_firstline);
+  if(fline.back() == '\n' || fline.back() == '\r') fline.pop_back();
+  //Should never get called unless there's an internal issue
+  if(fline.back() == '\n' || fline.back() == '\r') fline.pop_back();
 
-  //Process the request
-  me.processRequest(session);
-  me.checkRequest(session);
-  me.prepareSession(session);
-  me.workerFunction(session);
-  me.sendResponse(session);
-}
-
-//Processes the request. Runs the functions, one after the other
-void http::HttpServer::processRequest(http::HttpSession& session)
-{
-  //Read the first line
-  std::string buf0 = me.readLine(session, vars::maxlen_firstline);
   std::vector<std::string> parts;
-  boost::split(parts, buf0, boost::is_any_of(" "));
-  if(parts.size() != 3)
-  {
-    throw EXCEPTION("Error! Unable to process request. Initial request line invalid!", 400);
-  }
+  boost::trim(fline);
+  boost::split(parts, fline, boost::is_any_of(" "));
 
-  //Fill out the bitset fields!
   session.information |= http::getRequestType(parts[0]);
   session.information |= http::getRequestProtocol(parts[2]);
-
-  //Set the path!
   session.path_unprocessed = parts[1];
 
-
-  //Process GET queries
-  me.parseGetQueries(session);
-  //Process HTTP headers
-  me.parseHeaders(session);
-  //Process POST queries
-  me.parsePostQueries(session);
+  me.processRequestUrl(session);
+  return session.information;
 }
 
-//Retrieves GET queries from the URL
-void http::HttpServer::parseGetQueries(HttpSession& session)
+void HttpServer::processRequestUrl(HttpSession& session)
 {
-  //Find the first question mark
-  size_t qloc = session.path_unprocessed.find('?');
-  //If there are no GET queries
-  if(qloc == std::string::npos)
-  {
-    session.path = session.path_unprocessed;
-  }
-  //Again, no GET queries, but trailing question mark to remove
-  else if(qloc == session.path_unprocessed.size() - 1)
-  {
-    session.path = session.path_unprocessed.substr(0, session.path_unprocessed.size() - 1);
-  }
-  //Actually parse GET queries
+  std::vector<std::string> parts = base::splitByFirstDelimiter(session.path_unprocessed, "?");
+  if(parts.size() == 1) session.path = parts[0];
   else
   {
-    //Retrieve the queries' string and break
-    std::string queries = session.path_unprocessed.substr(qloc + 1, session.path_unprocessed.size());
-    std::vector<std::string> pairs;
-    boost::split(pairs, queries, boost::is_any_of("&"));
-
-    //Process each query
-    for(size_t i = 0; i < pairs.size(); i++)
+    session.path = parts[0];
+    std::vector<std::string> queries;
+    boost::split(queries, parts[1], boost::is_any_of("&"));
+    if(queries.size() > vars::max_ngetq || vars::max_ngetq == 0)
+    for(size_t i = 0; i < queries.size(); i++)
     {
-      size_t eloc = pairs[i].find('=');
-      //If the equal sign does not exist or is the last character
-      if(eloc == std::string::npos || pairs[i].back() == '=')
+      std::vector<std::string> qp = base::splitByFirstDelimiter(queries[i], "=");
+      if(qp.size() == 1)
       {
-        std::string key = pairs[i];
-        if(key.back() == '=') key.pop_back();
-        if(key.size() == 0) continue;
-        session.get_queries[http::decodeURI(key)].data = "";
-        session.get_queries[http::decodeURI(key)].type = http::DataSource::String;
+        if(http::decodeURI(qp[0]).size() == 0) continue;
+        else
+        {
+          session.get_queries[http::decodeURI(qp[0])].data = "";
+          session.get_queries[http::decodeURI(qp[0])].type = DataSource::String;
+        }
       }
-      //If it is a plain ol' GET request
       else
       {
-        //If the field name is empty (Naughty Naughty!)
-        if(eloc - 1 == 0) continue;
-
-        std::string key = http::decodeURI(pairs[i].substr(0, eloc - 1));
-        std::string value = http::decodeURI(pairs[i].substr(eloc + 1));
-        session.get_queries[key].data = "";
-        session.get_queries[key].type = http::DataSource::String;
+        if(http::decodeURI(qp[0]).size() == 0) continue;
+        else
+        {
+          session.get_queries[http::decodeURI(qp[0])].data = http::decodeURI(qp[1]);
+          session.get_queries[http::decodeURI(qp[0])].type = DataSource::String;
+        }
       }
     }
   }
 }
 
-//Retrieves and parses all headers
-void http::HttpServer::parseHeaders(http::HttpSession& session)
+int HttpServer::processHeaders(HttpSession& session)
 {
-  //Number of cookies downloaded from client in session
-  size_t dcookies = 0;
-  //Download headers -- up to out limit
-  for(size_t i = 0; vars::max_hdrct != 0 || i < vars::max_hdrct; i++)
+  size_t i = 0;
+  while(vars::max_hdrct == 0 || i++ < vars::max_hdrct)
   {
-    //Download header
-    std::string hdr = me.readLine(session, vars::max_hdrklen + vars::max_hdrvlen + 2);
-    //Empty means no more headers
-    if(hdr.size() == 0) break;
-    //Find the [first] colon
-    size_t pos = hdr.find(':');
-    if(pos == std::string::npos)
+    std::string header = session.connection->readline('\n', vars::max_hdrlen);
+    if(header.back() == '\n' || header.back() == '\r') header.pop_back();
+    //Should never get called unless there's an internal issue
+    if(header.back() == '\n' || header.back() == '\r') header.pop_back();
+
+    std::vector<std::string> parts = base::splitByFirstDelimiter(header, ":");
+    if(parts.size() != 0) boost::to_lower(parts[0]);
+
+    if(parts.size() == 0)
     {
-      //Parse a cookie -- actually, the cookie does not exist here!
-      std::string chcookie = hdr;
-      boost::to_lower(chcookie);
-      boost::trim(chcookie);
-      if(chcookie == "cookie")
-      {
-        i--;
-        continue;
-      }
-      session.incoming_headers[chcookie] = "";
+      break;
+    }
+    else if(parts.size() == 1)
+    {
+      if(parts[0] == "cookie") continue;
+      session.incoming_headers[parts[0]] = "";
     }
     else
     {
-      //Prepare header
-      std::string key = hdr.substr(0, pos - 1);
-      std::string value = hdr.substr(pos + 1, hdr.size());
-      boost::to_lower(key);
-      boost::trim(key);
-      boost::trim(value);
-
-      //Check if cookie header
-      if(key == "cookie")
-      {
-        i--;
-        dcookies++;
-        if(dcookies > vars::max_ncookies) throw EXCEPTION("Maximum number of cookies downloaded. Cannot download more!", 413);
-        //Parse the cookie! (Nom num nom)
-        size_t cpos = value.find('=');
-        if(cpos == std::string::npos)
-        {
-          boost::to_lower(value);
-          if(vars::max_cookiekeylen > 0 && value.size() > vars::max_cookiekeylen)
-            throw EXCEPTION("Maximum supported bytes for HTTP request reached!", 413);
-          session.incoming_cookies[value] = "";
-        }
-        else
-        {
-          std::string key = value.substr(0, cpos - 1);
-          boost::trim(key);
-          boost::to_lower(key);
-          std::string val = value.substr(cpos + 1, value.size());
-          boost::trim(val);
-          if(vars::max_cookiekeylen > 0 && key.size() > vars::max_cookiekeylen)
-            throw EXCEPTION("Maximum supported bytes for HTTP cookie request reached!", 413);
-          if(vars::max_cookiekeylen > 0 && val.size() > vars::max_cookievallen)
-            throw EXCEPTION("Maximum supported bytes for HTTP cookie request reached!", 413);
-          session.incoming_cookies[key] = val;
-        }
-        continue;
-      }
-
-      session.incoming_headers[key] = value;
+      boost::trim(parts[1]);
+      session.incoming_headers[parts[0]] = parts[1];
     }
   }
-}
 
-//Downloads and parses the POST queries
-void http::HttpServer::parsePostQueries(http::HttpSession& session)
-{
-  std::string ctp = session.incoming_headers["content-type"];
-  boost::to_lower(ctp);
-
-  //If multipart request
-  if(ctp.find("multipart/form-data"))
+  //Check if we have a WebSockets connection request
+  if(!strcasecmp(session.incoming_headers["connection"].c_str(), "upgrade"))
   {
-  }
-  else	//General POST request
-  {
-    size_t length = std::atoll(session.incoming_headers["content-length"].c_str());
-    if(length > vars::max_postlen)
-      throw EXCEPTION("Cannot handle this much POST data! Asset too large for processing!", 413);
-    std::vector<std::string> queries;
-
-    char* data = new char[length + 2];
-    memset((void*) data, 0, length + 2);
-
-    boost::asio::read(session.socket, boost::asio::buffer(data, length));
-
-    std::string str(data);
-    delete data;
-
-    boost::split(queries, str, boost::is_any_of("&"));
-
-    for(std::vector<std::string>::const_iterator it = queries.begin(); it != queries.end(); ++it)
+    if(!strcasecmp(session.incoming_headers["upgrade"].c_str(), "websocket"))
     {
-      std::vector<std::string> parts;
-      boost::split(parts, *it, boost::is_any_of("="));
-
-      //If they sent ...&=&...
-      if(parts.size() == 0) continue;
-      //If they sent ...&x=&...
-      if(parts.size() == 1)
-      {
-        http::decodeURI(parts[0]);
-        session.post_queries[parts[0]].data = "";
-        session.post_queries[parts[0]].type = http::DataSource::String;
-      }
-      //If they sent ...&x=y&...
-      else
-      {
-        http::decodeURI(parts[0]);
-        session.post_queries[parts[0]].data = parts[1];
-        session.post_queries[parts[0]].type = http::DataSource::String;
-      }
+      return Websockets;
     }
   }
+
+  return 0;
 }
 
-
-//Checks for the validity of the request
-void http::HttpServer::checkRequest(http::HttpSession& session)
+int HttpServer::processPostQueries(HttpSession& session)
 {
-  if(session.information & http::Http1_1)
+  if(!(session.information & PostRequest)) return 0;
+  if(session.incoming_headers["content-length"].size() == 0)
+    throw HTTPEXCEPT("Error. No body \"Content-Length\" header provided!", 411, 411);
+  size_t len = atoll(session.incoming_headers["content-length"].c_str());
+  if(len > vars::max_postdata)
+    throw HTTPEXCEPT("Error. Entity too large!", 413, 413);
+
+  std::string str;
+  session.connection->read(str, len);
+  std::vector<std::string> queries;
+  boost::split(queries, str, boost::is_any_of("&"));
+  for(size_t i = 0; i < queries.size(); i++)
   {
-    //We must have recieved the Host header. If not, we must send back 400 Bad Request!
-    if(session.incoming_headers["host"].empty())
-      throw EXCEPTION("Error. No \"host\" header specified. Cannot route request, as per HTTP 1.1+ standards!", 400);
+    std::vector<std::string> qp = base::splitByFirstDelimiter(queries[i], "=");
+    if(qp.size() == 1)
+    {
+      boost::trim(qp[0]);
+      if(qp[0].size() == 0) continue;
+      qp[0] = decodeURI(qp[0]);
+      session.post_queries[qp[0]].data = "";
+      session.post_queries[qp[0]].type = DataSource::String;
+    }
+    else if(qp.size() == 2)
+    {
+      boost::trim(qp[0]);
+      if(qp[0].size() == 0) continue;
+      boost::trim(qp[1]);
+      qp[0] = decodeURI(qp[0]);
+      qp[1] = decodeURI(qp[1]);
+      session.post_queries[qp[0]].data = qp[1];
+      session.post_queries[qp[0]].type = DataSource::String;
+    }
   }
+
+  return 0;
 }
 
+int HttpServer::checkRequest(HttpSession& session)
+{
+  if(session.information & Http1_1 || session.information & Http2_0)
+  {
+    if(session.incoming_headers.find("host") == session.incoming_headers.end())
+    {
+      throw HTTPEXCEPT("Error! No host provided! Routing failed!", 400, 400);
+    }
+  }
+  return 0;
+}
 
-//Sets default values for important fields
-void http::HttpServer::prepareSession(http::HttpSession& session)
+int HttpServer::prepareSession(HttpSession& session)
 {
   session.outgoing_headers["content-type"] = "text/html";
   session.status_code = 200;
+  return 0;
 }
 
-
-//Check to make sure the session worker handled all required tasks and add anything else
-void http::HttpServer::checkSessionResponse(http::HttpSession& session)
+int HttpServer::checkResponse(HttpSession& session)
 {
-  if(session.outgoing_headers.find("content-type") == session.outgoing_headers.end())
+  if(session.outgoing_headers.find("date") != session.outgoing_headers.end()) session.outgoing_headers.erase("date");
+  if(session.outgoing_headers.find("server") != session.outgoing_headers.end()) session.outgoing_headers["server"] = "YO Integrated Webserver";
+  return 0;
+}
+
+//To safeguard FILE pointers. Just a quickie! :)
+class FileLock
+{
+public:
+  FILE* fil;
+  FileLock(FILE* f) : fil(f)
   {
-    session.outgoing_headers["content-type"] = "octet/stream";
   }
 
-  if(session.response.type == http::DataSource::NoData)
+  FileLock() : fil(NULL)
+  {}
+
+  ~FileLock()
   {
-    session.outgoing_headers["content-length"] = "0";
+    if(fil != NULL)
+    {
+      fclose(fil);
+      fil = NULL;
+    }
+  }
+};
+
+int HttpServer::sendResponse(HttpSession& session)
+{
+  FileLock lock;
+  if(session.response.type == DataSource::File)
+  {
+    lock.fil = fopen(session.response.data.c_str(), "r");
+    if(lock.fil == NULL)
+      throw HTTPEXCEPT("Error. Unable to load specified file!", 404, 404);
   }
 
-  session.outgoing_headers["date"] = http::timestamp();
-}
+  if(session.status_string.size() == 0) session.status_string = getStatusString(session.status_code);
+  //Send the first response line (terminated by \r\n)
+  session.connection->write(getRequestProtocol(session.information) + " " + boost::to_string(session.status_code) + " " + session.status_string + "\r\n");
 
-//Send response
-void http::HttpServer::sendResponse(http::HttpSession& session)
-{
-  if(session.information & http::Http1_0)
+  session.connection->write("Date: " + timestamp() + "\r\n");
+
+  for(boost::unordered_map<std::string, std::string>::const_iterator it = session.outgoing_headers.begin(); it != session.outgoing_headers.end(); ++it)
   {
-    boost::asio::write(*session.socket, boost::asio::buffer("HTTP/1.0 " + boost::to_string(session.status_code) + " " + session.status_string + "\r\n"));
+    session.connection->write(it->first + ": " + it->second + "\r\n");
   }
-}
 
-
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/* HttpSession functions */
-
-const std::string http::HttpSession::getPath()
-{
-  return me.path;
-}
-
-const std::string http::HttpSession::getUnprocessedPath()
-{
-  return me.path_unprocessed;
-}
-
-const http::DataSource http::HttpSession::getQuery(std::string key)
-{
-  if(me.get_queries.count(key) > 0)
-    return me.get_queries[key];
-  else
-    return me.post_queries[key];
-}
-
-
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/* Functions "in the wild" */
-
-http::HttpOptions http::getRequestType(std::string reqstr)
-{
-  if(reqstr == "GET") return http::GetRequest;
-  else if(reqstr == "POST") return http::PostRequest;
-  else if(reqstr == "PUT") return http::PutRequest;
-  else if(reqstr == "DELETE") return http::DeleteRequest;
-  else if(reqstr == "CONNECT") return http::ConnectRequest;
-  else if(reqstr == "TRACE") return http::TraceRequest;
-  else throw EXCEPTION(std::string("Error: Request action requested (" + reqstr + ") not supported!").c_str(), 405);
-}
-
-http::HttpOptions http::getRequestProtocol(std::string reqstr)
-{
-  if(reqstr == "HTTP/1.0") return http::Http1_0;
-  else if(reqstr == "HTTP/1.1") return http::Http1_1;
-  else if(reqstr == "HTTP/2.0") return http::Http2_0;
-  else throw EXCEPTION(std::string("Error: Protocol requested (" + reqstr + ") not supported!").c_str(), 505);
-}
-
-static const char* const days[] =
-{ "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
-static const char* const months[] =
-{ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
-
-std::string http::timestamp()
-{
-  time_t localtime;
-  struct tm* tme;
-  localtime = time(NULL);
-  tme = gmtime(&localtime);
-
-  std::stringstream str;
-  str << days[tme->tm_wday]
-      << ", "
-      << tme->tm_mday << " "
-      << months[tme->tm_mon] << " "
-      << tme->tm_year + 1900 << " "
-      << tme->tm_hour << ":"
-      << tme->tm_min << ":"
-      << tme->tm_sec << " GMT";
-
-  return str.str();
-}
-
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/* Class basic functions/setup functions */
-
-http::HttpServer::HttpServer() :
-  listeningPort(0),
-  isServerRunning(false)
-{}
-
-http::HttpServer::~HttpServer()
-{}
-
-//Reads a line from the socket
-std::string http::HttpServer::readLine(http::HttpSession& session, size_t len)
-{
-  std::stringstream str;
-  char och = 'x';
-  size_t ret = 0;
-  while(true)
+  for(boost::unordered_map<std::string, std::string>::const_iterator it = session.outgoing_cookies.begin(); it != session.outgoing_cookies.end(); ++it)
   {
-    char ch;
-    session.socket->read_some(boost::asio::buffer(&ch, sizeof(char)));
-    if((och == '\r' || och == '\n') && (ch == '\n'))
-      break;
-    str << ch;
-    ret++;
-    if(len != 0 && ret >= len)
-      throw EXCEPTION("Maximum supported bytes were read!", 413);
-    och = ch;
+    session.connection->write("Set-Cookie: " + it->first + "=" + it->second + "\r\n");
   }
-  std::string string = str.str();
-  string.pop_back();
-  return string;
-}
-//Less writing. Don't want to get arthritis :)
 
-#define ERRR if(me.isServerRunning) {throw EXCEPTION("Error: Server is already running! May not change value!", -1);}
-#define SET(var, val) if(!me.safeMode)return var=val;else {var=val; return "";}
-#define GET(var) if(me.safeMode)return ""; else return var;
-short http::HttpServer::getPort()
-{
-  return me.listeningPort;
+  if(session.response.type == DataSource::String)
+  {
+    session.connection->write("Content-Length: " + boost::to_string(session.response.data.size()) + "\r\n\r\n");
+    session.connection->write(session.response.data + "\r\n");
+  }
+  else if(session.response.type == DataSource::File)
+  {
+    fseek(lock.fil, 0, SEEK_END);
+    size_t pos = ftell(lock.fil);
+    fseek(lock.fil, 0, SEEK_SET);
+    session.connection->write_fd(fileno(lock.fil), pos);
+    session.connection->write("\r\n");
+  }
+
+  return 0;
 }
 
-short http::HttpServer::setPort(short port)
+void HttpServer::requestHandler(HttpSession& session)
 {
-  ERRR
-  return (me.listeningPort = port);
+  session.response.type = DataSource::String;
+  session.response.data = "Hello World!";
+  session.outgoing_headers["content-type"] = "text/plain";
 }

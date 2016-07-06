@@ -14,7 +14,9 @@ SOURCES += main.cpp \
     config.cpp \
     database/database_basics.cpp \
     httpserver.cpp \
-    httpsupport.cpp
+    tcpserver_internals.cpp \
+    http_internals.cpp \
+    string_algorithms.cpp
 
 HEADERS += \
     exceptions.h \
@@ -24,7 +26,8 @@ HEADERS += \
     config.h \
     database/database_basics.h \
     httpserver.h \
-    httpsupport.h
+    http_internals.h \
+    string_algorithms.h
 
 DISTFILES += \
     CONFIGURATION.md
