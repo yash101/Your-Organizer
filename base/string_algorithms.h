@@ -7,6 +7,7 @@
 namespace base
 {
   std::vector<std::string> splitByFirstDelimiter(std::string str, std::string find);
+  size_t replaceAll(std::string& in, std::string find, std::string replace);
 }
 
 #endif // STRING_ALGORITHMS_H

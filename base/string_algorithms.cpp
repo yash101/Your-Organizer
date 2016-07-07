@@ -26,3 +26,28 @@ std::vector<std::string> base::splitByFirstDelimiter(std::string str, std::strin
     return ret;
   }
 }
+
+size_t base::replaceAll(std::string& in, std::string find, std::string repl)
+{
+  if(in.size() == 0) return 0;
+
+  std::string ret;
+  ret.reserve(in.size());
+
+  size_t start = 0;
+  size_t pos = 0;
+  size_t n = 0;
+
+  while((pos = in.find(find, start)) != std::string::npos)
+  {
+    n++;
+    ret += in.substr(start, pos - start);
+    ret += repl;
+    pos += find.length();
+    start = pos;
+  }
+
+  ret += in.substr(start);
+  in.swap(ret);
+  return n;
+}
