@@ -306,7 +306,7 @@ int HttpServer::sendResponse(HttpSession& session)
   FileLock lock;
   if(session.response.type == DataSource::File)
   {
-    lock.fil = fopen(session.response.data.c_str(), "r");
+    lock.fil = fopen(session.response.data.c_str(), "r+");
     if(lock.fil == NULL)
       throw HTTPEXCEPT("Error. Unable to load specified file!", 404, 404);
   }

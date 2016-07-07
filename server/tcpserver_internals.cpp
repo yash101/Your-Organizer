@@ -346,11 +346,34 @@ SOCK_IO_RET TcpServerConnection::write_fd(SOCK_HANDLE handle, size_t dataRead)
   while(bytes_to_write > 0)
   {
     ret = sendfile(me._fileDescriptor, handle, NULL, bytes_to_write);
-    if(ret <= 0)
+    if(ret < 0)
     {
       throw EXCEPTION("Unable to write file to socket!", -1);
     }
+    if(ret == 0) break;
     bytes_to_write -= ret;
+  }
+
+  if(bytes_to_write != 0 && ret == 0)
+  {
+    boost::shared_ptr<char> buffer(new char[16348]);
+    while(bytes_to_write > 0)
+    {
+      ret = ::read(handle, buffer.get(), 16384);
+      if(ret <= 0)
+      {
+        perror("An error ocurred when attempting to read from a file: ");
+        return 0;
+      }
+      ret = send(me._fileDescriptor, (void*) buffer.get(), ret, MSG_NOSIGNAL);
+      if(ret <= 0)
+      {
+        perror("An error ocurred when attempting to write data to the socket!");
+        throw EXCEPTION("An error ocurred when attempting to write data to the socket!", me._fileDescriptor);
+      }
+
+      bytes_to_write -= ret;
+    }
   }
 
   return ret;
