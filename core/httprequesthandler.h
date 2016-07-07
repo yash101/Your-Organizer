@@ -7,7 +7,7 @@
 namespace yo
 {
   const static char mm_regex = 0x2;
-  const static char mm_match = 0x4;
+  const static char mm_compare = 0x4;
 
   class HttpAction;
   class HostHandler;
