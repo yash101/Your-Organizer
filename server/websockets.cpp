@@ -22,13 +22,22 @@ int HttpServer::websocketHandshake(HttpSession& session, WebsocketsSession& wses
 {
   //Send the first few headers
   session.connection->write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: upgrade\r\n");
+
+  //Does nothing. Just to quiet the compiler whining
+  wsession.httpSession->information |= 0;
+
+  return 0;
 }
 
 
 void HttpServer::websocketInit(HttpSession& session)
 {
+  //Does nothing. Just to quiet the compiler whining
+  session.information |= 0;
 }
 
 void HttpServer::websocketWorker(WebsocketsSession& session)
 {
+  //Does nothing. Just to quiet the compiler whining
+  session.httpSession->information |= 0;
 }

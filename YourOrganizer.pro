@@ -17,7 +17,9 @@ SOURCES += main.cpp \
     server/httpserver.cpp \
     server/tcpserver.cpp \
     server/tcpserver_internals.cpp \
-    server/websockets.cpp
+    server/websockets.cpp \
+    core/webserver.cpp \
+    core/httprequesthandler.cpp
 
 HEADERS += \
     base/automaticmutex.h \
@@ -28,7 +30,9 @@ HEADERS += \
     libraries/tinyxml2.h \
     server/http_internals.h \
     server/httpserver.h \
-    server/tcpserver.h
+    server/tcpserver.h \
+    core/webserver.h \
+    core/httprequesthandler.h
 
 DISTFILES += \
     CONFIGURATION.md \
