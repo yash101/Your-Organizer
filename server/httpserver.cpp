@@ -91,6 +91,8 @@ void HttpServer::worker(srv::TcpServerConnection& connection)
 
     ret = me.checkResponse(session);
     ret = me.sendResponse(session);
+
+    break;
   }
 }
 

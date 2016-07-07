@@ -341,49 +341,18 @@ SOCK_IO_RET TcpServerConnection::write(std::string str)
 
 SOCK_IO_RET TcpServerConnection::write_fd(SOCK_HANDLE handle, size_t dataRead)
 {
-  size_t pos = 0;
-  char* buffer = new char[8192];
+  size_t bytes_to_write = dataRead;
   SOCK_IO_RET ret = 0;
-  while(pos > 0)
+  while(bytes_to_write > 0)
   {
-
-#ifndef _WIN32
-
-    ret = sendfile(me._fileDescriptor, handle, 0, dataRead);
-    if(ret < 0)
+    ret = sendfile(me._fileDescriptor, handle, NULL, bytes_to_write);
+    if(ret <= 0)
     {
-      delete[] buffer;
-      throw EXCEPTION("Unable to write file to socket!", 500);
+      throw EXCEPTION("Unable to write file to socket!", -1);
     }
-    pos += ret;
-    dataRead -= ret;
-
-#else
-
-    ret = read(handle, buffer, 8192 * sizeof(char));
-    if(ret < 0)
-    {
-      if(errno == EINTR) continue;
-      else throw EXCEPTION("Unable to read from file descriptor!", 500);
-    }
-
-    do
-    {
-      ret = send(me._fileDescriptor, buffer, ret);
-      if(ret < 0)
-      {
-        if(errno == EINTR) continue;
-      }
-
-      pos += ret;
-      dataRead -= ret;
-    } while(ret < 0);
-
-#endif
-
+    bytes_to_write -= ret;
   }
 
-  delete[] buffer;
   return ret;
 }
 
