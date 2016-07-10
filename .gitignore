@@ -39,3 +39,8 @@
 # Mac
 .DS_Store
 
+*.svn
+*.log
+*.lock-swcript
+
+/node_modules
