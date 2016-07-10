@@ -1,11 +1,6 @@
 extends ./login_landing.jade
 
 block content
-  input(type="text" name="username" placeholder="Username")
-  br
-  input(type="email" name="email" placeholder="Email Address")
-  br
-  input(type="password" name="password" placeholder="Password")
-  br
+  input(type="text" name="uname" placeholder="Username/Email")
   input(type="password" name="cpassword" placeholder="Confirm Password!")
-  a(href="/login")= "Log In!"
+  a(href="/login")= "Register"
