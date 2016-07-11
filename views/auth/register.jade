@@ -1,7 +1,18 @@
-extends ./login_landing.jade
-
-block content
-  input(type="email" name="email" placeholder="Email")
-  input(type="text" name="username" placeholder="Username")
-  input(type="password" name="password" placeholder="Password")
-  input(type="password" name="cpassword" placeholder="Re-enter Password")
+doctype html
+html
+  head
+    title= "Register | Your Organizer"
+    link(rel="stylesheet" type="text/css" href="/css/base.css")
+    link(rel="stylesheet" type="text/css" href="/css/forms.css")
+  body
+    form(action="/auth/login")
+      h1= "Registration"
+      p.ilabel= "Username:"
+      input(type="text" name="username" placeholder="Username")
+      p.ilabel= "Email Address:"
+      input(type="email" name="email" placeholder="Email")
+      p.ilabel= "Password"
+      input(type="password" name="password" placeholder="Password")
+      p.ilabel= "Confirm Password"
+      input(type="password" name="cpasswd" placeholder="Re-enter Password")
+      input(type="submit" value="Log In!")

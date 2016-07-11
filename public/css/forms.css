@@ -1,0 +1,61 @@
+form
+{
+  background-color: #FFFFFF;
+  position: absolute;
+  top: 10%;
+  left: 10%;
+  right: 10%;
+  padding-top: 0px;
+  padding: 32px;
+  text-align: right;
+  box-shadow: 0 1px 3px #C6C6C6;
+}
+
+form > h1
+{
+  text-align: center;
+}
+
+form > input
+{
+  display: inline-block;
+  
+  width: 100%;
+  height: auto;
+  box-sizing: border-box;
+
+  font-size: 18px;
+
+  padding-left: 4px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+
+  margin-bottom: 8px;
+
+  border: 1px solid #404040;
+  border-radius: 4px;
+  color: #800080;
+}
+
+form > input[type=submit]
+{
+  width: 240px;
+  height: 48px;
+  background-color: #FFFFFF;
+  margin-bottom: 0px;
+}
+
+form > p.ilabel
+{
+  text-align: left;
+  margin: 0px;
+}
+
+form > input:hover,
+form > input:active,
+form > input:focus
+{
+  background-color: #CA278C;
+  color: #FFFFFF;
+}
+
