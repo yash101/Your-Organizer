@@ -6,6 +6,25 @@ var cookieParser = require('cookie-parser');
 var bodyParser = require('body-parser');
 var pg = require('pg').Pool;
 
+
+// Database stuff
+var conf = require('./config');
+
+var dbconf = {
+  host: conf.dbHost + ":" + conf.dbPort,
+  user: conf.dbUser,
+  password: conf.dbPass,
+  database: conf.dbName
+};
+var pgPool = new pg(config);
+
+require('./database_init')(pgPool);
+
+
+process.on('unhandledRejection', function(e) {
+  console.log(e.message, e.stack);
+});
+
 var routes = require('./routes/index');
 var users = require('./routes/users');
 
@@ -22,6 +41,12 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Set the database
+app.use(function(req, res, next) {
+  req.dbPool = pgPool;
+  next();
+});
 
 app.use('/', routes);
 app.use('/users', users);
@@ -56,6 +81,5 @@ app.use(function(err, req, res, next) {
     error: {}
   });
 });
-
 
 module.exports = app;
