@@ -8,7 +8,7 @@ var pg = require('pg').Pool;
 
 
 // Database stuff
-var conf = require('./config');
+var conf = require('./config.js');
 
 var dbconf = {
   host: conf.dbHost + ":" + conf.dbPort,
@@ -16,9 +16,9 @@ var dbconf = {
   password: conf.dbPass,
   database: conf.dbName
 };
-var pgPool = new pg(config);
+var pgPool = new pg(dbconf);
 
-require('./database_init')(pgPool);
+require('./database_init.js')(pgPool);
 
 
 process.on('unhandledRejection', function(e) {
