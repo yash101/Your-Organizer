@@ -30,8 +30,8 @@
       }
 
       //Check if username exists
-      client.query("SELECT * FROM users WHERE username=$1 OR email=$1",
-        [username], function cu(err, result)
+      client.query("SELECT * FROM users WHERE username=$1 OR email=$2",
+        [username, email], function cu(err, result)
       {
         if(err) {
           gc();

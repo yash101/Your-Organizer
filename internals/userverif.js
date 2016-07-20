@@ -59,12 +59,9 @@
   ret.checkPassword = function checkPassword(password) {
     //Just an optimization. If password's too long/short, skip the regex!
     if(password.length < 5 || password.length > 32) return false;
-
+/*
     var regex = /^(?=.*[0-9])[a-zA-Z0-9!@#$%^&*~`]{5,32}/;
-    if(!regex.test(password)) {
-      return false;
-    }
-
+    return regex.test(password); */
     return true;
   };
 
