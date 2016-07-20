@@ -30,7 +30,7 @@
       }
 
       //Check if username exists
-      client.query("SELECT * FROM users WHERE username=$1",
+      client.query("SELECT * FROM users WHERE username=$1 OR email=$1",
         [username], function cu(err, result)
       {
         if(err) {
@@ -41,13 +41,12 @@
 
         if(result && result.rows.length != 0) {
           gc();
-          callback(false, "User already exists!");
+          callback(false, "User or email address already in use!");
           return;
         }
 
-        //Check if email exists
-        client.query("SELECT * FROM users WHERE email=$1",
-          [email], function ce(err, result)
+        client.query("INSERT INTO users (username, password, email) VALUES ($1, $2, $3)",
+          [username, password, email], function(err, result)
         {
           if(err) {
             gc();
@@ -55,26 +54,9 @@
             return;
           }
 
-          if(result && result.rows.length != 0) {
-            gc();
-            callback(false, "Email already in use!");
-            return;
-          }
-
-          client.query("INSERT INTO users (username, password, email) VALUES ($1, $2, $3)",
-            [username, password, email], function(err, result)
-          {
-            if(err) {
-              gc();
-              callback(false, "Error: " + err);
-              return;
-            }
-
-            gc();
-            callback(true, "User registration successful!");
-            return;
-          });
-
+          gc();
+          callback(true, "User registration successful!");
+          return;
         });
 
       });
