@@ -11,19 +11,17 @@ var pg = require('pg').Pool;
 var conf = require('./config.js');
 
 var dbconf = {
-  host: conf.dbHost + ":" + conf.dbPort,
+  host: conf.dbHost,
   user: conf.dbUser,
   password: conf.dbPass,
   database: conf.dbName
 };
 var pgPool = new pg(dbconf);
 
-require('./database_init.js')(pgPool);
-
-
 process.on('unhandledRejection', function(e) {
   console.log(e.message, e.stack);
 });
+require('./database_init.js')(pgPool);
 
 var routes = require('./routes/index');
 var users = require('./routes/users');
